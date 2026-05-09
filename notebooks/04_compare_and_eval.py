@@ -280,6 +280,37 @@ def judge_with_anthropic(rows):
     return results
 
 
+def judge_with_gemini(rows):
+    try:
+        from google import genai
+        from google.genai import types
+    except ImportError:
+        return None
+    client = genai.Client()
+    results = []
+    for p, sft, dpo in zip(EVAL_PROMPTS, sft_outputs, dpo_outputs):
+        msg = JUDGE_PROMPT_TEMPLATE.format(
+            prompt=p["prompt"], category=p["category"], sft=sft, dpo=dpo
+        )
+        try:
+            resp = client.models.generate_content(
+                model=os.environ.get("JUDGE_MODEL", "gemini-2.5-flash"),
+                contents=msg,
+                config=types.GenerateContentConfig(
+                    temperature=0,
+                    response_mime_type="application/json",
+                )
+            )
+            parsed = json.loads(resp.text)
+        except Exception as e:
+            parsed = {"winner": "tie", "justification": f"Gemini error: {e}"[:200]}
+        
+        parsed["id"] = p["id"]
+        parsed["category"] = p["category"]
+        results.append(parsed)
+    return results
+
+
 # %%
 judge_results = None
 
@@ -289,6 +320,9 @@ if os.environ.get("OPENAI_API_KEY"):
 elif os.environ.get("ANTHROPIC_API_KEY"):
     print("Found ANTHROPIC_API_KEY — running claude-haiku judge")
     judge_results = judge_with_anthropic(rows)
+elif os.environ.get("GEMINI_API_KEY"):
+    print("Found GEMINI_API_KEY — running gemini judge")
+    judge_results = judge_with_gemini(rows)
 
 if judge_results is None:
     print("No API keys set. Falling back to manual rubric mode.")
